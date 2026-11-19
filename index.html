@@ -2372,7 +2372,7 @@ function doPost(e) {
                 const matAIdx = text.search(/^##\s*Mặt\s*A\b/im);
                 const matBIdx = text.search(/^##\s*Mặt\s*B\b/im);
                 if (matAIdx === -1 || matBIdx === -1 || matBIdx <= matAIdx) {
-                    throw new Error('Không tìm thấy đủ hai phần "## Mặt A" và "## Mặt B".');
+                    throw new Error('Không tìm thấy đủ hai phần "## Mặt A" và "# Mặt B".');
                 }
 
                 const linesA = text.slice(matAIdx, matBIdx).split('\n');
@@ -3582,7 +3582,7 @@ function doPost(e) {
                             document.getElementById('btn-preview-print').classList.toggle('hidden', !isPrint);
                             document.getElementById('parse-preview-panel').classList.add('hidden');
                             document.getElementById('input-mode-desc').innerHTML = isPrint
-                                ? 'Dán bản in dạng <code># DAY ...</code> có <code>## Mặt A</code> và <code>## Mặt B</code> — hệ thống tự tách các Tình huống, bỏ dòng chấm <code>……</code> và ghép cặp câu theo số thứ tự.'
+                                ? 'Dán bản in dạng <code># DAY ...</code> có <code>## Mặt A</code> và <code># Mặt B</code> — hệ thống tự tách các Tình huống, bỏ dòng chấm <code>……</code> và ghép cặp câu theo số thứ tự.'
                                 : 'Dán đoạn tiếng Việt đánh số thứ tự, sau đó là dấu <code>---</code>, rồi đến đoạn tiếng Anh đánh số thứ tự tương ứng.';
                             break;
                         }
