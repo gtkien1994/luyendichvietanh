@@ -2370,9 +2370,9 @@ function doPost(e) {
                 const dayTitle = dayMatch ? dayMatch[1].trim() : '';
 
                 const matAIdx = text.search(/^##\s*Mặt\s*A\b/im);
-                const matBIdx = text.search(/^#\s*Mặt\s*B\b/im);
+                const matBIdx = text.search(/^##\s*Mặt\s*B\b/im);
                 if (matAIdx === -1 || matBIdx === -1 || matBIdx <= matAIdx) {
-                    throw new Error('Không tìm thấy đủ hai phần "## Mặt A" và "# Mặt B".');
+                    throw new Error('Không tìm thấy đủ hai phần "## Mặt A" và "## Mặt B".');
                 }
 
                 const linesA = text.slice(matAIdx, matBIdx).split('\n');
