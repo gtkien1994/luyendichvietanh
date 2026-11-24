@@ -2552,7 +2552,7 @@ function doPost(e) {
                 outEl.innerHTML = `<p style="color: var(--indigo); font-size: 0.8rem; font-weight: 600;">Đang phân tích cách dùng từ/cụm từ...</p>`;
 
                 try {
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+                    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
                     const prompt = [
                         'Hãy nhận xét CỰC KỲ NGẮN GỌN, dễ hiểu, tiết kiệm token bằng tiếng Việt.',
                         'CHỈ tập trung vào sự khác nhau khi dùng từ hoặc cụm từ (word choice / collocations) giữa bản dịch của người học và đáp án mẫu trong ngữ cảnh (ví dụ: tại sao dùng "make a decision" thay vì "decide").',
