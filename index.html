@@ -105,6 +105,7 @@
         .gap-3 { gap: 0.75rem; }
         .gap-4 { gap: 1rem; }
         .space-y-1 > * + * { margin-top: 0.25rem; }
+        .space-y-1-5 > * + * { margin-top: 0.375rem; }
         .space-y-2 > * + * { margin-top: 0.5rem; }
         .space-y-3 > * + * { margin-top: 0.75rem; }
         .space-y-4 > * + * { margin-top: 1rem; }
@@ -628,6 +629,28 @@
             color: var(--text-main);
         }
 
+        /* Attempt Logs inside History */
+        .attempt-log-list {
+            border-top: 1px dashed var(--border-strong);
+            padding-top: 0.65rem;
+            margin-top: 0.25rem;
+        }
+        .attempt-log-item {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.6rem;
+            padding: 0.6rem 0.75rem;
+            font-size: 0.82rem;
+        }
+        .attempt-log-note {
+            margin-top: 0.35rem;
+            padding: 0.35rem 0.55rem;
+            border-radius: 0.45rem;
+            background-color: var(--amber-soft);
+            color: var(--amber-text);
+            font-size: 0.76rem;
+        }
+
         /* Progress Bar */
         .progress-track {
             flex: 1;
@@ -877,7 +900,7 @@
             <div class="flex items-center justify-between gap-2">
                 <div>
                     <h3 style="font-size: 1rem; font-weight: 700;">Hướng dẫn &amp; Code Google Apps Script</h3>
-                    <p style="font-size: 0.75rem; color: var(--text-muted);">Đồng bộ JSON giữa máy tính và điện thoại qua Google Sheets</p>
+                    <p style="font-size: 0.75rem; color: var(--text-muted);">Tự động chia mảnh 40.000 ký tự/ô &amp; nối sang cột B, C... khi vượt 1.000 dòng</p>
                 </div>
                 <button type="button" data-action="close-script-modal" class="btn btn-outline btn-sm">Đóng</button>
             </div>
@@ -886,16 +909,18 @@
                 <li>Mở Google Drive và tạo một file <strong>Google Sheets</strong> mới.</li>
                 <li>Chọn <strong>Tiện ích mở rộng (Extensions) &rarr; Apps Script</strong>.</li>
                 <li>Xóa code mặc định, dán đoạn code dưới đây và bấm <strong>Lưu</strong>.</li>
-                <li>Chọn <strong>Triển khai (Deploy) &rarr; Tùy chọn triển khai mới (New deployment)</strong> &rarr; chọn <strong>Ứng dụng web (Web app)</strong>: đặt <em>Execute as: Me</em> và <em>Who has access: Anyone</em>.</li>
+                <li>Chọn <strong>Triển khai (Deploy) &rarr; Tùy chọn triển khai mới (New deployment)</strong> (hoặc <em>Quản lý các tùy chọn triển khai &rarr; Phiên bản mới</em>) &rarr; chọn <strong>Ứng dụng web (Web app)</strong>: đặt <em>Execute as: Me</em> và <em>Who has access: Anyone</em>.</li>
                 <li>Sao chép <strong>Web App URL</strong>, dán vào tab <strong>Tiến độ &amp; Sync</strong> và bấm <strong>Lưu cấu hình</strong>.</li>
             </ol>
 
             <div class="space-y-2">
                 <div class="flex items-center justify-between">
-                    <span style="font-size: 0.72rem; font-weight: 700; color: var(--text-muted);">CODE.GS</span>
+                    <span style="font-size: 0.72rem; font-weight: 700; color: var(--text-muted);">CODE.GS (CHIA MẢNH ĐA CỘT KHÔNG GIỚI HẠN)</span>
                     <button type="button" data-action="copy-script-code" class="btn btn-primary btn-sm">Sao chép code</button>
                 </div>
                 <pre id="apps-script-code-text" class="code-block">const SECRET_TOKEN = "";
+const CHUNK_SIZE = 40000;      // Dưới ngưỡng 50.000 ký tự/ô của Google Sheets
+const MAX_ROWS_PER_COL = 1000; // Đủ 1.000 dòng thì tự nối sang cột B, C, D...
 
 function jsonResponse(obj) {
   return ContentService
@@ -915,7 +940,28 @@ function doGet(e) {
       return jsonResponse({ ok: false, error: "Invalid token" });
     }
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
-    const raw = sheet.getRange("A1").getValue();
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    if (lastRow < 1 || lastCol < 1) {
+      return jsonResponse({ ok: true, payload: null });
+    }
+
+    const parts = [];
+    for (let col = 1; col <= lastCol; col++) {
+      const startRow = (col === 2) ? 2 : 1; // B1 dùng hiển thị thời gian cập nhật
+      const numRows = lastRow - startRow + 1;
+      if (numRows <= 0) continue;
+
+      const values = sheet.getRange(startRow, col, numRows, 1).getValues();
+      for (let r = 0; r < values.length; r++) {
+        const cellVal = values[r][0];
+        if (cellVal !== "" && cellVal !== null && cellVal !== undefined) {
+          parts.push(String(cellVal));
+        }
+      }
+    }
+
+    const raw = parts.join("");
     return jsonResponse({ ok: true, payload: raw ? JSON.parse(raw) : null });
   } catch (err) {
     return jsonResponse({ ok: false, error: err.message });
@@ -929,9 +975,41 @@ function doPost(e) {
       return jsonResponse({ ok: false, error: "Invalid token" });
     }
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
-    sheet.getRange("A1").setValue(JSON.stringify(body.payload || {}));
-    sheet.getRange("B1").setValue("Updated: " + new Date().toISOString());
-    return jsonResponse({ ok: true, syncedAt: new Date().toISOString() });
+    const jsonStr = JSON.stringify(body.payload || {});
+    const chunks = [];
+
+    for (let i = 0; i < jsonStr.length; i += CHUNK_SIZE) {
+      chunks.push(jsonStr.slice(i, i + CHUNK_SIZE));
+    }
+    if (chunks.length === 0) {
+      chunks.push("");
+    }
+
+    sheet.clearContents();
+
+    let cursor = 0;
+    let col = 1;
+    while (cursor < chunks.length) {
+      const startRow = (col === 2) ? 2 : 1;
+      const capacity = MAX_ROWS_PER_COL - startRow + 1;
+      const slice = chunks.slice(cursor, cursor + capacity).map(ch => [ch]);
+      if (slice.length > 0) {
+        sheet.getRange(startRow, col, slice.length, 1).setValues(slice);
+      }
+      cursor += slice.length;
+      col++;
+    }
+
+    sheet.getRange("B1").setValue(
+      "Updated: " + new Date().toISOString() + " (" + jsonStr.length + " chars, " + chunks.length + " chunks)"
+    );
+
+    return jsonResponse({
+      ok: true,
+      syncedAt: new Date().toISOString(),
+      chars: jsonStr.length,
+      chunks: chunks.length
+    });
   } catch (err) {
     return jsonResponse({ ok: false, error: err.message });
   }
@@ -1099,11 +1177,11 @@ function doPost(e) {
                         <div class="space-y-1" style="padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
                             <div class="flex items-center justify-between">
                                 <label class="field-label" for="personal-note-input" style="margin-bottom: 0;">
-                                    Ghi chú cá nhân cho câu này (tự lưu để xem lại trong Lịch sử):
+                                    Ghi chú cá nhân cho lần gõ này (tự lưu kèm vào Lịch sử):
                                 </label>
                                 <span id="note-saved-badge" class="hidden" style="font-size: 0.7rem; font-weight: 600; color: var(--emerald);">Đã lưu ghi chú</span>
                             </div>
-                            <textarea id="personal-note-input" rows="2" placeholder="Ghi lại lý do sai hoặc cách dùng từ hay (ví dụ: dùng make a decision tự nhiên hơn decide)..."></textarea>
+                            <textarea id="personal-note-input" rows="2" placeholder="Ghi lại lý do sai hoặc cách dùng từ hay cho lần gõ này..."></textarea>
                         </div>
 
                         <!-- Spaced Repetition Rating & Next -->
@@ -1139,7 +1217,7 @@ function doPost(e) {
         <!-- ==================== TAB 2: NGỮ CẢNH & NHẬP LIỆU ==================== -->
         <section id="panel-scenarios" class="hidden space-y-5">
 
-            <!-- Input Form: Keep Legacy Format + Add Print Format (Day 1 / Day 44) -->
+            <!-- Input Form -->
             <div class="card space-y-4">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                     <div>
@@ -1231,7 +1309,7 @@ function doPost(e) {
                     <button type="button" data-action="tree-collapse-all" class="btn btn-outline btn-sm">Thu gọn (-)</button>
                 </div>
 
-                <!-- Category Filter Chips (lọc hiển thị nhanh theo nhánh gốc) -->
+                <!-- Category Filter Chips -->
                 <div id="scenarios-category-chips" class="chip-row"></div>
 
                 <!-- Hierarchical Tree Container -->
@@ -1246,9 +1324,9 @@ function doPost(e) {
             <div id="history-list-box" class="card space-y-4">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                        <h2 style="font-size: 1rem; font-weight: 700;">Lịch sử luyện tập theo ngữ cảnh</h2>
+                        <h2 style="font-size: 1rem; font-weight: 700;">Lịch sử luyện tập &amp; Nhật ký các lần gõ</h2>
                         <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.15rem;">
-                            Bấm vào từng phiên để xem phần trăm độ chuẩn, câu dịch sai và ghi chú cá nhân của bạn.
+                            Lưu đầy đủ từng lần gõ (Lần 1, Lần 2, Lần 3...) kèm ghi chú riêng của mỗi lần, kể cả khi bạn luyện lại từng câu lẻ hoặc ôn SR.
                         </p>
                     </div>
                     <div class="flex items-center gap-2">
@@ -1275,7 +1353,7 @@ function doPost(e) {
 
                     <div class="nav-bar">
                         <button type="button" id="btn-filter-mistakes" data-action="set-history-filter" data-filter="mistakes" class="nav-tab-btn active">
-                            Chỉ xem câu sai / cần ôn
+                            Chỉ xem câu có lần sai / cần ôn
                         </button>
                         <button type="button" id="btn-filter-all" data-action="set-history-filter" data-filter="all" class="nav-tab-btn">
                             Tất cả câu
@@ -1314,7 +1392,7 @@ function doPost(e) {
                     <div>
                         <h3 style="font-size: 1rem; font-weight: 700;">Cấu hình &amp; Đồng bộ Google Sheets</h3>
                         <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.15rem;">
-                            Nút <strong>Lưu cấu hình</strong> lưu Web App URL và Gemini API Key vào bộ nhớ trình duyệt trên thiết bị hiện tại. Hỗ trợ tự động tải khi mở và đẩy khi ẩn/đóng trang.
+                            Nút <strong>Lưu cấu hình</strong> lưu Web App URL và Gemini API Key vào bộ nhớ trình duyệt trên thiết bị hiện tại. Hỗ trợ chia mảnh 40.000 ký tự/ô &amp; nối đa cột tự động.
                         </p>
                     </div>
                     <button type="button" data-action="open-script-modal" class="btn btn-outline btn-sm">Xem hướng dẫn &amp; Code Script</button>
@@ -1356,7 +1434,7 @@ function doPost(e) {
             <div class="card space-y-3">
                 <h3 style="font-size: 1rem; font-weight: 700;">Xuất / Nhập dữ liệu JSON</h3>
                 <p style="font-size: 0.78rem; color: var(--text-muted);">
-                    Sao lưu toàn bộ cây cấp/nhánh, ngữ cảnh, lịch Spaced Repetition, lịch sử phần trăm và ghi chú cá nhân ra file <code>.json</code> hoặc nạp lại.
+                    Sao lưu toàn bộ cây cấp/nhánh, ngữ cảnh, lịch Spaced Repetition, nhật ký từng lần gõ và ghi chú cá nhân ra file <code>.json</code> hoặc nạp lại.
                 </p>
                 <div class="flex flex-wrap items-center gap-2">
                     <button type="button" data-action="export-json" class="btn btn-primary">Xuất JSON</button>
@@ -1464,16 +1542,18 @@ function doPost(e) {
             let state = {
                 categories: [...DEFAULT_CATEGORIES],
                 scenarios: cloneSamples(),
-                treeNodes: [], // Flexible hierarchical tree: { id, kind: 'branch'|'scenario', title, scenarioId?, parentId?, collapsed?, order? }
+                treeNodes: [],
                 srMap: {},
                 progress: {},
                 sentenceNotes: {},
                 sentenceDrafts: {},
+                attemptHistory: {}, // { [sentenceId]: Array<{ id, userEn, isPassed, statusLabel, note, createdAt, mode }> }
                 historySessions: [],
                 lastSyncAt: null
             };
 
             let activeSessionMap = {};
+            let currentAttemptIdBySentence = {}; // Track current attempt log ID while editing note on the active check panel
             let currentTab = 'practice';
             let practiceMode = 'context';
             let practiceCategoryFilter = 'ALL';
@@ -1484,11 +1564,11 @@ function doPost(e) {
             let srQueue = [];
             let srPointer = 0;
             let expandedEnglishMap = {};
-            let selectedTreeScenarioId = null; // Action drawer toggle when clicked
-            let inputMode = 'legacy'; // 'legacy' | 'print'
+            let selectedTreeScenarioId = null;
+            let inputMode = 'legacy';
             let parsedPrintBatch = [];
             let contextMenuTargetNodeId = null;
-            let selectedHistoryId = null;
+            let selectedHistoryScenarioId = null;
             let historyFilter = 'mistakes';
             let pendingConfirmAction = null;
 
@@ -1623,7 +1703,6 @@ function doPost(e) {
                     });
                 }
 
-                // Ensure every scenario in state.scenarios exists in treeNodes
                 const linkedScenarioIds = new Set(
                     state.treeNodes.filter(n => n.kind === 'scenario' && n.scenarioId).map(n => n.scenarioId)
                 );
@@ -1645,10 +1724,44 @@ function doPost(e) {
                     }
                 });
 
-                // Remove orphan scenario tree nodes
                 const validIds = new Set(state.scenarios.map(s => s.id));
                 state.treeNodes = state.treeNodes.filter(n => n.kind !== 'scenario' || validIds.has(n.scenarioId));
                 reindexTreeOrders();
+            }
+
+            // Migrate legacy historySessions into per-sentence attemptHistory if not yet migrated
+            function migrateLegacyHistorySessionsIfNeeded() {
+                if (!state.attemptHistory || typeof state.attemptHistory !== 'object') {
+                    state.attemptHistory = {};
+                }
+                if (!Array.isArray(state.historySessions) || state.historySessions.length === 0) return;
+
+                // Reverse chronological order so oldest session becomes Attempt 1
+                const chronological = [...state.historySessions].reverse();
+                chronological.forEach(sess => {
+                    const sessTime = sess.completedAt || new Date().toISOString();
+                    (sess.items || []).forEach(it => {
+                        if (!it.sentenceId) return;
+                        if (!Array.isArray(state.attemptHistory[it.sentenceId])) {
+                            state.attemptHistory[it.sentenceId] = [];
+                        }
+                        const alreadyExists = state.attemptHistory[it.sentenceId].some(
+                            a => a.legacySessionId === sess.id
+                        );
+                        if (!alreadyExists && it.userEn && it.userEn !== '(Chưa dịch)') {
+                            state.attemptHistory[it.sentenceId].push({
+                                id: genId('att'),
+                                legacySessionId: sess.id,
+                                userEn: it.userEn,
+                                isPassed: Boolean(it.isPassed),
+                                statusLabel: it.isPassed ? 'Chuẩn rồi' : 'Cần ôn lại',
+                                note: it.note || '',
+                                createdAt: sessTime,
+                                mode: 'context'
+                            });
+                        }
+                    });
+                });
             }
 
             function ensureCategoriesIntegrity() {
@@ -1668,6 +1781,7 @@ function doPost(e) {
                     }
                 });
                 syncTreeFromScenariosIfNeeded();
+                migrateLegacyHistorySessionsIfNeeded();
             }
 
             function loadState() {
@@ -1683,6 +1797,7 @@ function doPost(e) {
                             progress: parsed.progress && typeof parsed.progress === 'object' ? parsed.progress : {},
                             sentenceNotes: parsed.sentenceNotes && typeof parsed.sentenceNotes === 'object' ? parsed.sentenceNotes : {},
                             sentenceDrafts: parsed.sentenceDrafts && typeof parsed.sentenceDrafts === 'object' ? parsed.sentenceDrafts : {},
+                            attemptHistory: parsed.attemptHistory && typeof parsed.attemptHistory === 'object' ? parsed.attemptHistory : {},
                             historySessions: Array.isArray(parsed.historySessions) ? parsed.historySessions : [],
                             lastSyncAt: parsed.lastSyncAt || null
                         };
@@ -1824,12 +1939,18 @@ function doPost(e) {
                 if (tabName === 'sync') renderSyncTab();
             }
 
+            function getScenariosWithAttemptLogs() {
+                return state.scenarios.filter(sc =>
+                    (sc.sentences || []).some(s => Array.isArray(state.attemptHistory[s.id]) && state.attemptHistory[s.id].length > 0)
+                );
+            }
+
             function refreshBadges() {
                 const bSc = document.getElementById('badge-scenarios');
                 const bHist = document.getElementById('badge-history');
                 const bSr = document.getElementById('sr-due-badge');
                 if (bSc) bSc.textContent = String(state.scenarios.length);
-                if (bHist) bHist.textContent = String(state.historySessions.length);
+                if (bHist) bHist.textContent = String(getScenariosWithAttemptLogs().length);
                 if (bSr) bSr.textContent = String(getDueSRItems().length);
             }
 
@@ -1986,8 +2107,9 @@ function doPost(e) {
 
                 renderPassageHighlighting(scenario, sentenceIdx);
 
-                const draftText = activeSessionMap[scenario.id]?.[sentence.id]?.userEn ?? state.sentenceDrafts[sentence.id] ?? '';
-                document.getElementById('en-translation-input').value = draftText;
+                // Default to blank input when re-practicing or doing SR (only preserve draft within the active session if user jumps back & forth)
+                const activeDraft = practiceMode === 'context' ? (activeSessionMap[scenario.id]?.[sentence.id]?.draftEn ?? '') : '';
+                document.getElementById('en-translation-input').value = activeDraft;
             }
 
             function renderPassageHighlighting(scenario, activeIdx) {
@@ -2053,6 +2175,24 @@ function doPost(e) {
                 return result;
             }
 
+            function appendSentenceAttemptLog(sentenceId, payload) {
+                if (!Array.isArray(state.attemptHistory[sentenceId])) {
+                    state.attemptHistory[sentenceId] = [];
+                }
+                const attId = genId('att');
+                state.attemptHistory[sentenceId].push({
+                    id: attId,
+                    userEn: payload.userEn,
+                    isPassed: Boolean(payload.isPassed),
+                    statusLabel: payload.statusLabel || (payload.isPassed ? 'Chuẩn rồi' : 'Chưa đạt'),
+                    note: payload.note || '',
+                    createdAt: new Date().toISOString(),
+                    mode: practiceMode
+                });
+                currentAttemptIdBySentence[sentenceId] = attId;
+                return attId;
+            }
+
             function openComparison(revealOnly) {
                 const target = getCurrentTarget();
                 if (!target) return;
@@ -2063,13 +2203,44 @@ function doPost(e) {
                     return;
                 }
 
-                state.sentenceDrafts[target.sentence.id] = userInput;
-                if (!revealOnly) {
-                    const p = state.progress[target.sentence.id] || { attempts: 0, gotItCount: 0, lastPracticedAt: 0 };
+                const sentId = target.sentence.id;
+                const scId = target.scenario.id;
+
+                if (practiceMode === 'context') {
+                    if (!activeSessionMap[scId]) activeSessionMap[scId] = {};
+                    const prev = activeSessionMap[scId][sentId] || {};
+                    activeSessionMap[scId][sentId] = {
+                        ...prev,
+                        sentenceId: sentId,
+                        vi: target.sentence.vi,
+                        refEn: target.sentence.en,
+                        draftEn: userInput
+                    };
+                }
+
+                // Log every check attempt (or reveal with text) into attemptHistory so Attempt 1, 2, 3... are preserved
+                if (!revealOnly && userInput) {
+                    const p = state.progress[sentId] || { attempts: 0, gotItCount: 0, lastPracticedAt: 0 };
                     p.attempts += 1;
                     p.lastPracticedAt = Date.now();
-                    state.progress[target.sentence.id] = p;
+                    state.progress[sentId] = p;
+
+                    appendSentenceAttemptLog(sentId, {
+                        userEn: userInput,
+                        isPassed: false,
+                        statusLabel: 'Đã kiểm tra',
+                        note: ''
+                    });
+                } else {
+                    // Reveal answer without typing: still create a placeholder attempt ID if user wants to add a note for this turn
+                    appendSentenceAttemptLog(sentId, {
+                        userEn: userInput || '(Xem đáp án)',
+                        isPassed: false,
+                        statusLabel: 'Xem đáp án',
+                        note: ''
+                    });
                 }
+
                 persistState();
 
                 const section = document.getElementById('comparison-section');
@@ -2088,9 +2259,9 @@ function doPost(e) {
                     }).join('');
                 }
 
+                // Start fresh note input for this specific attempt
                 const noteEl = document.getElementById('personal-note-input');
-                const savedNote = activeSessionMap[target.scenario.id]?.[target.sentence.id]?.note ?? state.sentenceNotes[target.sentence.id] ?? '';
-                noteEl.value = savedNote;
+                noteEl.value = '';
                 document.getElementById('note-saved-badge').classList.add('hidden');
 
                 document.getElementById('ai-coach-output').innerHTML = `
@@ -2108,16 +2279,31 @@ function doPost(e) {
                 const scId = target.scenario.id;
 
                 state.sentenceNotes[sentId] = noteVal;
-                if (!activeSessionMap[scId]) activeSessionMap[scId] = {};
-                const prev = activeSessionMap[scId][sentId];
-                activeSessionMap[scId][sentId] = {
-                    sentenceId: sentId,
-                    vi: target.sentence.vi,
-                    refEn: target.sentence.en,
-                    userEn: prev?.userEn ?? document.getElementById('en-translation-input').value.trim() ?? '',
-                    isPassed: prev?.isPassed ?? false,
-                    note: noteVal
-                };
+
+                // Attach note to the exact current attempt in attemptHistory
+                const list = state.attemptHistory[sentId];
+                const activeAttId = currentAttemptIdBySentence[sentId];
+                if (Array.isArray(list) && list.length > 0) {
+                    const found = activeAttId ? list.find(a => a.id === activeAttId) : list[list.length - 1];
+                    if (found) {
+                        found.note = noteVal;
+                    }
+                }
+
+                if (practiceMode === 'context') {
+                    if (!activeSessionMap[scId]) activeSessionMap[scId] = {};
+                    const prev = activeSessionMap[scId][sentId];
+                    activeSessionMap[scId][sentId] = {
+                        sentenceId: sentId,
+                        vi: target.sentence.vi,
+                        refEn: target.sentence.en,
+                        userEn: prev?.userEn ?? document.getElementById('en-translation-input').value.trim() ?? '',
+                        draftEn: document.getElementById('en-translation-input').value.trim(),
+                        isPassed: prev?.isPassed ?? false,
+                        note: noteVal
+                    };
+                }
+
                 persistState();
                 document.getElementById('note-saved-badge').classList.remove('hidden');
             }
@@ -2131,8 +2317,29 @@ function doPost(e) {
                 const userEn = document.getElementById('en-translation-input').value.trim() || '(Chưa nhập bản dịch)';
                 const noteVal = document.getElementById('personal-note-input').value.trim();
 
-                state.sentenceNotes[sentId] = noteVal;
-                state.sentenceDrafts[sentId] = userEn;
+                if (noteVal) {
+                    state.sentenceNotes[sentId] = noteVal;
+                }
+
+                // Update the current attempt log (or append one if user rated directly without clicking Check first)
+                const list = Array.isArray(state.attemptHistory[sentId]) ? state.attemptHistory[sentId] : [];
+                const activeAttId = currentAttemptIdBySentence[sentId];
+                const existingAtt = activeAttId ? list.find(a => a.id === activeAttId) : null;
+
+                if (existingAtt) {
+                    existingAtt.userEn = userEn;
+                    existingAtt.isPassed = isGood;
+                    existingAtt.statusLabel = isGood ? 'Chuẩn rồi' : 'Cần ôn lại';
+                    existingAtt.note = noteVal;
+                } else {
+                    appendSentenceAttemptLog(sentId, {
+                        userEn,
+                        isPassed: isGood,
+                        statusLabel: isGood ? 'Chuẩn rồi' : 'Cần ôn lại',
+                        note: noteVal
+                    });
+                }
+                delete currentAttemptIdBySentence[sentId];
 
                 const existing = state.srMap[sentId] || {
                     intervalIdx: 0,
@@ -2157,20 +2364,25 @@ function doPost(e) {
                 state.srMap[sentId] = existing;
 
                 const prog = state.progress[sentId] || { attempts: 0, gotItCount: 0, lastPracticedAt: 0 };
-                prog.attempts += 1;
+                if (!existingAtt) {
+                    prog.attempts += 1;
+                }
                 if (isGood) prog.gotItCount += 1;
                 prog.lastPracticedAt = Date.now();
                 state.progress[sentId] = prog;
 
-                if (!activeSessionMap[scId]) activeSessionMap[scId] = {};
-                activeSessionMap[scId][sentId] = {
-                    sentenceId: sentId,
-                    vi: target.sentence.vi,
-                    refEn: target.sentence.en,
-                    userEn,
-                    isPassed: isGood,
-                    note: noteVal
-                };
+                if (practiceMode === 'context') {
+                    if (!activeSessionMap[scId]) activeSessionMap[scId] = {};
+                    activeSessionMap[scId][sentId] = {
+                        sentenceId: sentId,
+                        vi: target.sentence.vi,
+                        refEn: target.sentence.en,
+                        userEn,
+                        draftEn: userEn,
+                        isPassed: isGood,
+                        note: noteVal
+                    };
+                }
 
                 persistState();
                 showToast(
@@ -2185,21 +2397,35 @@ function doPost(e) {
                 const target = getCurrentTarget();
                 if (!target) return;
 
+                const sentId = target.sentence.id;
+                const scId = target.scenario.id;
+
                 if (!alreadyRecorded) {
-                    const sentId = target.sentence.id;
-                    const scId = target.scenario.id;
-                    if (!activeSessionMap[scId]?.[sentId]) {
+                    const typed = document.getElementById('en-translation-input').value.trim();
+                    const noteVal = document.getElementById('personal-note-input').value.trim();
+                    if (typed && !currentAttemptIdBySentence[sentId]) {
+                        appendSentenceAttemptLog(sentId, {
+                            userEn: typed,
+                            isPassed: false,
+                            statusLabel: 'Đã bỏ qua',
+                            note: noteVal
+                        });
+                    }
+                    delete currentAttemptIdBySentence[sentId];
+
+                    if (practiceMode === 'context' && !activeSessionMap[scId]?.[sentId]) {
                         if (!activeSessionMap[scId]) activeSessionMap[scId] = {};
                         activeSessionMap[scId][sentId] = {
                             sentenceId: sentId,
                             vi: target.sentence.vi,
                             refEn: target.sentence.en,
-                            userEn: document.getElementById('en-translation-input').value.trim() || '(Chưa nhập bản dịch)',
+                            userEn: typed || '(Chưa nhập bản dịch)',
+                            draftEn: typed,
                             isPassed: false,
-                            note: document.getElementById('personal-note-input').value.trim() || state.sentenceNotes[sentId] || ''
+                            note: noteVal
                         };
-                        persistState();
                     }
+                    persistState();
                 }
 
                 document.getElementById('comparison-section').classList.add('hidden');
@@ -2229,13 +2455,15 @@ function doPost(e) {
                 const mapForSc = activeSessionMap[scenario.id] || {};
                 const items = scenario.sentences.map(s => {
                     const rec = mapForSc[s.id];
+                    const logs = state.attemptHistory[s.id] || [];
+                    const latestLog = logs[logs.length - 1];
                     return {
                         sentenceId: s.id,
                         vi: s.vi,
                         refEn: s.en,
-                        userEn: rec ? rec.userEn : (state.sentenceDrafts[s.id] || '(Chưa dịch)'),
+                        userEn: rec ? rec.userEn : (latestLog ? latestLog.userEn : '(Chưa dịch)'),
                         isPassed: rec ? Boolean(rec.isPassed) : false,
-                        note: state.sentenceNotes[s.id] ?? rec?.note ?? ''
+                        note: rec?.note ?? latestLog?.note ?? ''
                     };
                 });
                 const totalSentences = items.length;
@@ -2275,9 +2503,9 @@ function doPost(e) {
                 const wrongCount = record.totalSentences - record.passedCount;
                 document.getElementById('summary-message').textContent = wrongCount === 0
                     ? 'Hoàn hảo! Bạn đạt 100% câu chuẩn trong ngữ cảnh này.'
-                    : `Có ${wrongCount} câu chưa chuẩn trong ngữ cảnh này. Bấm nút bên dưới để mở Lịch sử và xem chi tiết câu sai kèm ghi chú của bạn.`;
+                    : `Có ${wrongCount} câu chưa chuẩn trong ngữ cảnh này. Bấm nút bên dưới để mở Lịch sử và xem chi tiết các lần làm kèm ghi chú của bạn.`;
 
-                document.getElementById('btn-summary-to-history').setAttribute('data-history-id', record.id);
+                document.getElementById('btn-summary-to-history').setAttribute('data-scenario-id', record.scenarioId);
                 document.getElementById('btn-summary-to-history').setAttribute('data-history-filter', wrongCount > 0 ? 'mistakes' : 'all');
             }
 
@@ -2303,7 +2531,7 @@ function doPost(e) {
                 const target = getCurrentTarget();
                 if (!target) return;
 
-                const userEn = document.getElementById('en-translation-input').value.trim() || state.sentenceDrafts[target.sentence.id] || '';
+                const userEn = document.getElementById('en-translation-input').value.trim();
                 if (!userEn) {
                     showToast('Hãy nhập câu tiếng Anh trước khi gọi AI nhận xét.', 'warning');
                     return;
@@ -2370,9 +2598,9 @@ function doPost(e) {
                 const dayTitle = dayMatch ? dayMatch[1].trim() : '';
 
                 const matAIdx = text.search(/^##\s*Mặt\s*A\b/im);
-                const matBIdx = text.search(/^#\s*Mặt\s*B\b/im);
+                const matBIdx = text.search(/^##\s*Mặt\s*B\b/im);
                 if (matAIdx === -1 || matBIdx === -1 || matBIdx <= matAIdx) {
-                    throw new Error('Không tìm thấy đủ hai phần "## Mặt A" và "# Mặt B".');
+                    throw new Error('Không tìm thấy đủ hai phần "## Mặt A" và "## Mặt B".');
                 }
 
                 const linesA = text.slice(matAIdx, matBIdx).split('\n');
@@ -2385,7 +2613,7 @@ function doPost(e) {
                     const line = rawLine.trim();
                     if (!line) continue;
                     if (/^##\s*Mặt\s*A\b/i.test(line)) continue;
-                    if (/^[…\.]{4,}$/.test(line)) continue; // bỏ dòng chấm kẻ ngang viết tay
+                    if (/^[…\.]{4,}$/.test(line)) continue;
 
                     const h3 = line.match(/^###\s*(.+)$/);
                     if (h3) {
@@ -2661,7 +2889,7 @@ function doPost(e) {
             }
 
             // --- Tree Drag & Drop, Inline Rename, Context Menu ---
-            function moveTreeNode(draggedId, targetId, position /* 'before' | 'after' | 'inside' */) {
+            function moveTreeNode(draggedId, targetId, position) {
                 const dragged = state.treeNodes.find(n => n.id === draggedId);
                 const target = state.treeNodes.find(n => n.id === targetId);
                 if (!dragged || !target || dragged.id === target.id) return;
@@ -2861,7 +3089,6 @@ function doPost(e) {
             function renderScenariosTab() {
                 ensureCategoriesIntegrity();
 
-                // Populate branch selector in input form
                 const formCatSel = document.getElementById('input-scenario-category');
                 if (formCatSel) {
                     const prevVal = formCatSel.value;
@@ -2874,7 +3101,6 @@ function doPost(e) {
                     ].join('');
                 }
 
-                // Quick root-branch filter chips
                 const rootBranches = getTreeChildren(null).filter(n => n.kind === 'branch');
                 const chipsBox = document.getElementById('scenarios-category-chips');
                 if (chipsBox) {
@@ -3025,7 +3251,6 @@ function doPost(e) {
 
                         row.appendChild(labelEl);
 
-                        // Percentage badge displayed inline directly on both branches & scenarios
                         if (node.kind === 'branch') {
                             const agg = calcBranchAggregatePercent(node.id);
                             const pctBadge = document.createElement('span');
@@ -3047,7 +3272,6 @@ function doPost(e) {
 
                         li.appendChild(row);
 
-                        // Action drawer when scenario is clicked
                         if (node.kind === 'scenario' && node.scenarioId) {
                             const sc = state.scenarios.find(s => s.id === node.scenarioId);
                             if (sc) {
@@ -3111,48 +3335,53 @@ function doPost(e) {
                 }
             }
 
-            // --- History Tab ---
+            // --- History Tab (Grouped by Scenario + Full Attempt 1, 2, 3... Logs per Sentence) ---
             function renderHistoryTab() {
                 const listBox = document.getElementById('history-list-box');
                 const detailBox = document.getElementById('history-detail-box');
                 const clearBtn = document.getElementById('btn-clear-history');
 
-                if (selectedHistoryId) {
-                    const sess = state.historySessions.find(h => h.id === selectedHistoryId);
-                    if (sess) {
+                if (selectedHistoryScenarioId) {
+                    const sc = state.scenarios.find(s => s.id === selectedHistoryScenarioId);
+                    if (sc) {
                         listBox.classList.add('hidden');
                         detailBox.classList.remove('hidden');
-                        renderHistoryDetail(sess);
+                        renderHistoryScenarioDetail(sc);
                         return;
                     }
-                    selectedHistoryId = null;
+                    selectedHistoryScenarioId = null;
                 }
 
                 detailBox.classList.add('hidden');
                 listBox.classList.remove('hidden');
 
+                const scenariosWithLogs = getScenariosWithAttemptLogs();
+
+                const rootBranches = getTreeChildren(null).filter(n => n.kind === 'branch');
+                const filterNames = rootBranches.length ? rootBranches.map(b => b.title) : state.categories;
+
                 const histCatSel = document.getElementById('history-category-filter');
                 if (histCatSel) {
                     histCatSel.innerHTML = [
-                        `<option value="ALL" ${historyCategoryFilter === 'ALL' ? 'selected' : ''}>Tất cả chủ đề (${state.historySessions.length})</option>`,
-                        ...state.categories.map(cat => {
-                            const cnt = state.historySessions.filter(h => h.category === cat).length;
+                        `<option value="ALL" ${historyCategoryFilter === 'ALL' ? 'selected' : ''}>Tất cả chủ đề (${scenariosWithLogs.length})</option>`,
+                        ...filterNames.map(cat => {
+                            const cnt = scenariosWithLogs.filter(s => getScenarioRootBranchName(s.id) === cat || s.category === cat).length;
                             return `<option value="${escapeAttr(cat)}" ${historyCategoryFilter === cat ? 'selected' : ''}>${escapeHTML(cat)} (${cnt})</option>`;
                         })
                     ].join('');
                 }
 
                 const filtered = historyCategoryFilter === 'ALL'
-                    ? state.historySessions
-                    : state.historySessions.filter(h => h.category === historyCategoryFilter);
+                    ? scenariosWithLogs
+                    : scenariosWithLogs.filter(s => getScenarioRootBranchName(s.id) === historyCategoryFilter || s.category === historyCategoryFilter);
 
                 const container = document.getElementById('history-sessions-list');
-                if (!state.historySessions.length) {
+                if (!scenariosWithLogs.length) {
                     clearBtn.classList.add('hidden');
                     container.innerHTML = `
                         <div class="sub-box space-y-1" style="text-align: center; border-style: dashed; padding: 1.75rem;">
-                            <p style="font-size: 0.88rem; font-weight: 600;">Chưa có phiên luyện tập nào được lưu</p>
-                            <p style="font-size: 0.78rem; color: var(--text-muted);">Hoàn thành hết các câu trong một ngữ cảnh ở tab Luyện tập để xem điểm % và ghi chú tại đây.</p>
+                            <p style="font-size: 0.88rem; font-weight: 600;">Chưa có lịch sử luyện tập nào được lưu</p>
+                            <p style="font-size: 0.78rem; color: var(--text-muted);">Mỗi lần bạn kiểm tra hoặc đánh giá câu trong tab Luyện tập, kết quả và ghi chú của lần đó sẽ tự động lưu vào đây.</p>
                         </div>
                     `;
                     return;
@@ -3160,87 +3389,164 @@ function doPost(e) {
 
                 clearBtn.classList.remove('hidden');
                 if (!filtered.length) {
-                    container.innerHTML = `<div class="sub-box" style="text-align: center; color: var(--text-muted); font-size: 0.85rem;">Chưa có phiên luyện tập nào trong chủ đề này.</div>`;
+                    container.innerHTML = `<div class="sub-box" style="text-align: center; color: var(--text-muted); font-size: 0.85rem;">Chưa có lịch sử luyện tập nào trong chủ đề này.</div>`;
                     return;
                 }
 
-                container.innerHTML = filtered.map(sess => {
-                    const wrongCount = sess.totalSentences - sess.passedCount;
-                    const notesCount = (sess.items || []).filter(i => i.note && i.note.trim()).length;
-                    const pctBadge = sess.accuracyPct === 100 ? 'badge-emerald' : 'badge-amber';
-                    const dateStr = new Date(sess.completedAt).toLocaleString('vi-VN');
+                // Sort by most recent attempt timestamp
+                const sorted = [...filtered].sort((a, b) => {
+                    const lastTime = (sc) => {
+                        let maxT = 0;
+                        (sc.sentences || []).forEach(s => {
+                            const logs = state.attemptHistory[s.id] || [];
+                            logs.forEach(l => {
+                                const t = new Date(l.createdAt || 0).getTime();
+                                if (t > maxT) maxT = t;
+                            });
+                        });
+                        return maxT;
+                    };
+                    return lastTime(b) - lastTime(a);
+                });
+
+                container.innerHTML = sorted.map(sc => {
+                    const learned = calcScenarioLearnedPercent(sc);
+                    let totalAttempts = 0;
+                    let mistakeSentences = 0;
+                    let notesCount = 0;
+                    let latestIso = null;
+
+                    (sc.sentences || []).forEach(s => {
+                        const logs = state.attemptHistory[s.id] || [];
+                        totalAttempts += logs.length;
+                        if (logs.some(l => !l.isPassed)) mistakeSentences += 1;
+                        logs.forEach(l => {
+                            if (l.note && l.note.trim()) notesCount += 1;
+                            if (!latestIso || (l.createdAt && l.createdAt > latestIso)) {
+                                latestIso = l.createdAt;
+                            }
+                        });
+                    });
+
+                    const pctBadge = learned.pct >= 80 ? 'badge-emerald' : 'badge-amber';
+                    const dateStr = latestIso ? new Date(latestIso).toLocaleString('vi-VN') : '';
+                    const branchName = getScenarioRootBranchName(sc.id);
 
                     return `
-                        <div data-action="open-history" data-id="${escapeAttr(sess.id)}" class="sub-box flex items-center justify-between gap-3" style="cursor: pointer;">
+                        <div data-action="open-history" data-id="${escapeAttr(sc.id)}" class="sub-box flex items-center justify-between gap-3" style="cursor: pointer;">
                             <div class="space-y-1 min-w-0">
                                 <div class="flex items-center gap-2 flex-wrap">
-                                    <span class="badge badge-indigo">${escapeHTML(sess.category || DEFAULT_CATEGORIES[0])}</span>
-                                    <strong style="font-size: 0.9rem;">${escapeHTML(sess.scenarioTitle)}</strong>
-                                    ${wrongCount > 0 ? `<span class="badge badge-rose">${wrongCount} câu sai/cần ôn</span>` : ''}
+                                    <span class="badge badge-indigo">${escapeHTML(branchName)}</span>
+                                    <strong style="font-size: 0.9rem;">${escapeHTML(sc.title)}</strong>
+                                    <span class="badge badge-blue">${totalAttempts} lượt gõ</span>
+                                    ${mistakeSentences > 0 ? `<span class="badge badge-rose">${mistakeSentences} câu từng sai/cần ôn</span>` : ''}
                                     ${notesCount > 0 ? `<span class="badge badge-amber">${notesCount} note</span>` : ''}
                                 </div>
-                                <p style="font-size: 0.75rem; color: var(--text-muted);">${escapeHTML(dateStr)} • Đạt ${sess.passedCount}/${sess.totalSentences} câu</p>
+                                <p style="font-size: 0.75rem; color: var(--text-muted);">Cập nhật gần nhất: ${escapeHTML(dateStr)} • ${escapeHTML(learned.label)}</p>
                             </div>
-                            <span class="badge ${pctBadge}" style="font-size: 0.9rem; padding: 0.35rem 0.65rem;">${sess.accuracyPct}%</span>
+                            <span class="badge ${pctBadge}" style="font-size: 0.9rem; padding: 0.35rem 0.65rem;">${learned.pct}%</span>
                         </div>
                     `;
                 }).join('');
             }
 
-            function renderHistoryDetail(sess) {
-                document.getElementById('detail-category-badge').textContent = sess.category || DEFAULT_CATEGORIES[0];
-                document.getElementById('detail-title').textContent = sess.scenarioTitle;
+            function renderHistoryScenarioDetail(sc) {
+                const learned = calcScenarioLearnedPercent(sc);
+                document.getElementById('detail-category-badge').textContent = getScenarioRootBranchName(sc.id);
+                document.getElementById('detail-title').textContent = sc.title;
                 const badge = document.getElementById('detail-pct-badge');
-                badge.textContent = `${sess.accuracyPct}%`;
-                badge.className = `badge ${sess.accuracyPct === 100 ? 'badge-emerald' : 'badge-amber'}`;
+                badge.textContent = `${learned.pct}%`;
+                badge.className = `badge ${learned.pct >= 80 ? 'badge-emerald' : 'badge-amber'}`;
 
                 document.getElementById('detail-subtitle').textContent =
-                    `${new Date(sess.completedAt).toLocaleString('vi-VN')} • Chuẩn ${sess.passedCount}/${sess.totalSentences} câu`;
+                    `${learned.label} • Bấm sửa trực tiếp ghi chú của từng lần gõ bên dưới`;
 
                 const btnM = document.getElementById('btn-filter-mistakes');
                 const btnA = document.getElementById('btn-filter-all');
                 btnM.classList.toggle('active', historyFilter === 'mistakes');
                 btnA.classList.toggle('active', historyFilter === 'all');
 
-                const items = (sess.items || []).map((it, idx) => ({ ...it, idx }));
-                const visible = historyFilter === 'mistakes' ? items.filter(i => !i.isPassed) : items;
+                const sentencesWithLogs = (sc.sentences || []).map((s, idx) => {
+                    const logs = state.attemptHistory[s.id] || [];
+                    return { sentence: s, idx, logs };
+                }).filter(entry => entry.logs.length > 0);
+
+                const visible = historyFilter === 'mistakes'
+                    ? sentencesWithLogs.filter(entry => entry.logs.some(l => !l.isPassed))
+                    : sentencesWithLogs;
+
                 const container = document.getElementById('history-detail-items');
 
                 if (!visible.length) {
                     container.innerHTML = `
                         <div class="sub-box space-y-2" style="text-align: center;">
-                            <p style="font-size: 0.88rem; font-weight: 600; color: var(--emerald);">Không có câu sai nào trong ngữ cảnh này.</p>
-                            <button type="button" data-action="set-history-filter" data-filter="all" class="btn btn-outline btn-sm">Xem tất cả ${items.length} câu</button>
+                            <p style="font-size: 0.88rem; font-weight: 600; color: var(--emerald);">Không có câu nào từng sai trong ngữ cảnh này.</p>
+                            <button type="button" data-action="set-history-filter" data-filter="all" class="btn btn-outline btn-sm">Xem tất cả ${sentencesWithLogs.length} câu đã luyện</button>
                         </div>
                     `;
                     return;
                 }
 
-                container.innerHTML = visible.map(item => `
-                    <div class="sub-box space-y-3" style="border-color: ${item.isPassed ? 'var(--border-color)' : 'var(--amber)'};">
-                        <div class="flex items-center justify-between gap-2">
-                            <span style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">Câu ${item.idx + 1}</span>
-                            <span class="badge ${item.isPassed ? 'badge-emerald' : 'badge-rose'}">
-                                ${item.isPassed ? 'Chuẩn rồi' : 'Sai / Cần ôn'}
-                            </span>
-                        </div>
-                        <p style="font-size: 0.92rem; font-weight: 600;">${escapeHTML(item.vi)}</p>
-                        <div class="grid-2">
-                            <div class="card" style="padding: 0.75rem;">
-                                <span style="display: block; font-size: 0.68rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.25rem;">BẠN ĐÃ DỊCH</span>
-                                <p style="font-size: 0.85rem; color: ${item.isPassed ? 'var(--text-main)' : 'var(--rose-text)'};">${escapeHTML(item.userEn)}</p>
+                container.innerHTML = visible.map(({ sentence, idx, logs }) => {
+                    const latest = logs[logs.length - 1];
+                    const hasAnyFail = logs.some(l => !l.isPassed);
+
+                    const attemptRowsHtml = logs.map((att, aIdx) => {
+                        const timeStr = att.createdAt ? new Date(att.createdAt).toLocaleString('vi-VN') : '';
+                        const stBadgeClass = att.isPassed ? 'badge-emerald' : 'badge-rose';
+                        const modeTag = att.mode === 'sr' ? ' • Ôn SR' : '';
+                        return `
+                            <div class="attempt-log-item space-y-2">
+                                <div class="flex flex-wrap items-center justify-between gap-2">
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <span class="badge badge-gray">Lần ${aIdx + 1}</span>
+                                        <span class="badge ${stBadgeClass}">${escapeHTML(att.statusLabel || (att.isPassed ? 'Chuẩn rồi' : 'Cần ôn lại'))}</span>
+                                        <span style="font-size: 0.72rem; color: var(--text-muted);">${escapeHTML(timeStr)}${modeTag}</span>
+                                    </div>
+                                </div>
+                                <p style="font-size: 0.86rem; color: ${att.isPassed ? 'var(--text-main)' : 'var(--rose-text)'}; font-weight: 500;">
+                                    ${escapeHTML(att.userEn)}
+                                </p>
+                                <div>
+                                    <label class="field-label" style="font-size: 0.7rem;">Ghi chú riêng của Lần ${aIdx + 1}:</label>
+                                    <textarea
+                                        data-att-sent-id="${escapeAttr(sentence.id)}"
+                                        data-att-id="${escapeAttr(att.id)}"
+                                        rows="1"
+                                        placeholder="Thêm hoặc sửa ghi chú cho lần gõ này..."
+                                        class="attempt-note-textarea">${escapeHTML(att.note || '')}</textarea>
+                                </div>
                             </div>
-                            <div class="card" style="padding: 0.75rem;">
-                                <span style="display: block; font-size: 0.68rem; font-weight: 700; color: var(--emerald); margin-bottom: 0.25rem;">ĐÁP ÁN MẪU</span>
-                                <p style="font-size: 0.85rem; font-weight: 600;">${escapeHTML(item.refEn)}</p>
+                        `;
+                    }).join('');
+
+                    return `
+                        <div class="sub-box space-y-3" style="border-color: ${latest?.isPassed ? 'var(--border-color)' : 'var(--amber)'};">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <span style="font-size: 0.78rem; font-weight: 700; color: var(--text-muted);">
+                                    Câu ${idx + 1} • Tổng ${logs.length} lần gõ
+                                </span>
+                                <span class="badge ${latest?.isPassed ? 'badge-emerald' : (hasAnyFail ? 'badge-rose' : 'badge-amber')}">
+                                    Mới nhất: ${escapeHTML(latest?.statusLabel || '')}
+                                </span>
+                            </div>
+
+                            <div class="space-y-1">
+                                <p style="font-size: 0.94rem; font-weight: 600;">${escapeHTML(sentence.vi)}</p>
+                                <p style="font-size: 0.86rem; color: var(--emerald-text); font-weight: 600;">
+                                    Đáp án mẫu: ${escapeHTML(sentence.en)}
+                                </p>
+                            </div>
+
+                            <div class="attempt-log-list space-y-2">
+                                <div style="font-size: 0.72rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">
+                                    Lịch sử các lần nhập &amp; ghi chú tương ứng:
+                                </div>
+                                ${attemptRowsHtml}
                             </div>
                         </div>
-                        <div>
-                            <label class="field-label">Ghi chú của bạn:</label>
-                            <textarea data-edit-note-sid="${escapeAttr(sess.id)}" data-edit-note-idx="${item.idx}" rows="2" placeholder="Ghi chú thêm về từ vựng / cấu trúc..." class="history-note-textarea">${escapeHTML(item.note || '')}</textarea>
-                        </div>
-                    </div>
-                `).join('');
+                    `;
+                }).join('');
             }
 
             // --- Progress, Config, Sheet Sync & JSON ---
@@ -3289,6 +3595,7 @@ function doPost(e) {
                 state.progress = payload.progress || {};
                 state.sentenceNotes = payload.sentenceNotes || {};
                 state.sentenceDrafts = payload.sentenceDrafts || {};
+                state.attemptHistory = payload.attemptHistory && typeof payload.attemptHistory === 'object' ? payload.attemptHistory : {};
                 state.historySessions = Array.isArray(payload.historySessions) ? payload.historySessions : [];
                 state.lastSyncAt = new Date().toISOString();
                 ensureCategoriesIntegrity();
@@ -3300,11 +3607,13 @@ function doPost(e) {
                     renderSyncTab();
                     renderPracticeView();
                     renderScenariosTab();
+                    if (currentTab === 'history') renderHistoryTab();
                     showToast('Đã tải dữ liệu từ Google Sheets!', 'success');
                 } else {
                     renderSyncTab();
                     if (currentTab === 'practice') renderPracticeView();
                     if (currentTab === 'scenarios') renderScenariosTab();
+                    if (currentTab === 'history') renderHistoryTab();
                 }
                 return true;
             }
@@ -3392,6 +3701,7 @@ function doPost(e) {
                             progress: parsed.progress || {},
                             sentenceNotes: parsed.sentenceNotes || {},
                             sentenceDrafts: parsed.sentenceDrafts || {},
+                            attemptHistory: parsed.attemptHistory && typeof parsed.attemptHistory === 'object' ? parsed.attemptHistory : {},
                             historySessions: Array.isArray(parsed.historySessions) ? parsed.historySessions : [],
                             lastSyncAt: parsed.lastSyncAt || null
                         };
@@ -3582,7 +3892,7 @@ function doPost(e) {
                             document.getElementById('btn-preview-print').classList.toggle('hidden', !isPrint);
                             document.getElementById('parse-preview-panel').classList.add('hidden');
                             document.getElementById('input-mode-desc').innerHTML = isPrint
-                                ? 'Dán bản in dạng <code># DAY ...</code> có <code>## Mặt A</code> và <code># Mặt B</code> — hệ thống tự tách các Tình huống, bỏ dòng chấm <code>……</code> và ghép cặp câu theo số thứ tự.'
+                                ? 'Dán bản in dạng <code># DAY ...</code> có <code>## Mặt A</code> và <code>## Mặt B</code> — hệ thống tự tách các Tình huống, bỏ dòng chấm <code>……</code> và ghép cặp câu theo số thứ tự.'
                                 : 'Dán đoạn tiếng Việt đánh số thứ tự, sau đó là dấu <code>---</code>, rồi đến đoạn tiếng Anh đánh số thứ tự tương ứng.';
                             break;
                         }
@@ -3809,6 +4119,7 @@ function doPost(e) {
                                 currentSentenceIdx = 0;
                                 practiceMode = 'context';
                                 practiceCategoryFilter = 'ALL';
+                                delete activeSessionMap[scId]; // Fresh start with empty input boxes
                                 document.getElementById('session-summary-card').classList.add('hidden');
                                 document.getElementById('comparison-section').classList.add('hidden');
                                 switchTab('practice');
@@ -3816,12 +4127,12 @@ function doPost(e) {
                             break;
                         }
                         case 'open-history':
-                            selectedHistoryId = el.getAttribute('data-id');
+                            selectedHistoryScenarioId = el.getAttribute('data-id');
                             historyFilter = 'mistakes';
                             renderHistoryTab();
                             break;
                         case 'back-history-list':
-                            selectedHistoryId = null;
+                            selectedHistoryScenarioId = null;
                             renderHistoryTab();
                             break;
                         case 'set-history-filter':
@@ -3829,9 +4140,10 @@ function doPost(e) {
                             renderHistoryTab();
                             break;
                         case 'clear-history':
-                            askConfirm('Xóa toàn bộ lịch sử?', 'Xóa tất cả các phiên luyện tập đã lưu?', () => {
+                            askConfirm('Xóa toàn bộ lịch sử?', 'Xóa tất cả nhật ký các lần gõ & ghi chú lịch sử đã lưu?', () => {
+                                state.attemptHistory = {};
                                 state.historySessions = [];
-                                selectedHistoryId = null;
+                                selectedHistoryScenarioId = null;
                                 persistState();
                                 renderHistoryTab();
                                 showToast('Đã xóa lịch sử.', 'info');
@@ -3873,11 +4185,11 @@ function doPost(e) {
                 });
 
                 document.getElementById('btn-summary-to-history').addEventListener('click', (e) => {
-                    const hid = e.currentTarget.getAttribute('data-history-id');
+                    const scId = e.currentTarget.getAttribute('data-scenario-id');
                     const hfilter = e.currentTarget.getAttribute('data-history-filter') || 'mistakes';
                     switchTab('history');
-                    if (hid) {
-                        selectedHistoryId = hid;
+                    if (scId) {
+                        selectedHistoryScenarioId = scId;
                         historyFilter = hfilter;
                         renderHistoryTab();
                     }
@@ -3898,6 +4210,7 @@ function doPost(e) {
                     } else if (target.id === 'scenario-select') {
                         currentScenarioId = target.value;
                         currentSentenceIdx = 0;
+                        delete activeSessionMap[currentScenarioId]; // Start clean with empty input boxes
                         document.getElementById('session-summary-card').classList.add('hidden');
                         document.getElementById('comparison-section').classList.add('hidden');
                         renderPracticeView();
@@ -3920,16 +4233,17 @@ function doPost(e) {
                         saveCurrentPersonalNote();
                     } else if (target.id === 'tree-search-input') {
                         renderScenariosTab();
-                    } else if (target.classList.contains('history-note-textarea')) {
-                        const sid = target.getAttribute('data-edit-note-sid');
-                        const idx = Number(target.getAttribute('data-edit-note-idx'));
-                        const sess = state.historySessions.find(h => h.id === sid);
-                        if (sess && sess.items && sess.items[idx]) {
-                            sess.items[idx].note = target.value;
-                            if (sess.items[idx].sentenceId) {
-                                state.sentenceNotes[sess.items[idx].sentenceId] = target.value;
+                    } else if (target.classList.contains('attempt-note-textarea')) {
+                        const sentId = target.getAttribute('data-att-sent-id');
+                        const attId = target.getAttribute('data-att-id');
+                        const logs = state.attemptHistory[sentId];
+                        if (Array.isArray(logs)) {
+                            const item = logs.find(a => a.id === attId);
+                            if (item) {
+                                item.note = target.value;
+                                state.sentenceNotes[sentId] = target.value;
+                                persistState();
                             }
-                            persistState();
                         }
                     }
                 });
@@ -3941,7 +4255,6 @@ function doPost(e) {
                     }
                 });
 
-                // Root dropzone for moving nodes back to top level
                 const rootZone = document.getElementById('tree-root-dropzone');
                 if (rootZone) {
                     rootZone.addEventListener('dragover', (e) => {
